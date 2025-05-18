@@ -128,6 +128,7 @@ test "isValid" {
         .{ .word = "CRANE".*, .guess = "EASES".*, .arr = .{ .Misplaced, .Correct, .Incorrect, .Incorrect, .Incorrect }, .expected = false },
         .{ .word = "CARES".*, .guess = "EASES".*, .arr = .{ .Incorrect, .Correct, .Incorrect, .Misplaced, .Correct }, .expected = false },
         .{ .word = "xxvii".*, .guess = "songs".*, .arr = .{ .Incorrect, .Correct, .Correct, .Correct, .Incorrect }, .expected = false },
+        .{ .word = "eager".*, .guess = "wager".*, .arr = .{ .Incorrect, .Correct, .Correct, .Correct, .Correct }, .expected = true },
     };
 
     for (tests) |tst| {
@@ -171,7 +172,7 @@ test "eliminateWords" {
     }
 }
 
-fn interactive(word_list: std.ArrayList([5]u8)) void {
+pub fn interactive(word_list: *std.ArrayList([5]u8)) !void {
     var stdIn = std.io.getStdIn().reader();
 
     var buffer: [1024]u8 = undefined;
@@ -194,7 +195,7 @@ fn interactive(word_list: std.ArrayList([5]u8)) void {
             break :init val;
         };
 
-        eliminateWords(&word_list, guess, filter);
+        eliminateWords(word_list, guess, filter);
 
         std.debug.print("{s}\n", .{word_list.items[0]});
     }

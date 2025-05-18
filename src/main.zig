@@ -17,13 +17,42 @@ fn readWords(allocator: std.mem.Allocator, file_name: []const u8) !std.ArrayList
     return word_list;
 }
 
-const threadArg = struct {};
+const ThreadArg = struct {
+    word_list: *const std.ArrayList([5]u8),
+    next_key: *const usize,
+    next_lock: *const std.Thread.Mutex,
+    result_list: *const std.ArrayList(usize),
+};
 
-fn checkKeyword(word_list: std.ArrayList([5]u8), keyword: [5]u8) usize {
-    _ = word_list;
-    _ = keyword;
+fn nextKeyword(next_lock: *std.Thread.Mutex, next_key: *usize, last_key: usize) ?usize {
+    next_lock.lock();
+    defer {
+        next_key.* += 1;
+        next_lock.unlock();
+    }
+    if (next_key.* < last_key) {
+        return next_key.*;
+    } else {
+        return null;
+    }
+}
+
+fn checkKeyword(word_list: *std.ArrayList([5]u8), next_lock: *std.Thread.Mutex, next_key: *usize, result_list: *std.ArrayList(usize)) !void {
     // Search through each part of the list
 
+    const last_key = word_list.items.len;
+
+    while (nextKeyword(next_lock, next_key, last_key)) |key| {
+        const keyword = word_list.items[key];
+        var sum: usize = 0;
+        for (word_list.items) |guess| {
+            var working_list = try word_list.clone();
+            defer working_list.deinit();
+            lib.eliminateWords(&working_list, guess, lib.compareGuess(guess, keyword));
+            sum += word_list.items.len - working_list.items.len;
+        }
+        result_list.items[key] = sum / last_key;
+    }
 }
 
 const CPL = "\u{001B}[nF";
@@ -33,26 +62,45 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
     const allocator = gpa.allocator();
 
+    const args = try std.process.argsAlloc(allocator);
+
+    if (args.len != 2) {
+        std.process.exit(1);
+    }
+
     var word_list = try readWords(allocator, "words.txt"[0..]);
 
+    // try lib.interactive(&word_list);
+
     const list_size = word_list.items.len;
+
+    const num_thread = try std.fmt.parseInt(usize, args[1], 10);
+
+    const threads = try allocator.alloc(std.Thread, num_thread);
+    var next_lock = std.Thread.Mutex{};
+    var next_key: usize = 0;
 
     // Somewhere in here, split into multiple threads.
     const average_loss: std.ArrayList(usize) = init: {
         var word_loss_list = try std.ArrayList(usize).initCapacity(allocator, list_size);
-        for (word_list.items, 0..) |key, i| {
-            std.debug.print("Word: {d}/15025\n", .{i});
-            std.debug.print("Keyword: {s}\n", .{key});
-            var sum: usize = 0;
-            for (word_list.items) |guess| {
-                std.debug.print("Guess: {s}\n\u{001B}[1F", .{guess});
-                var working_list = try word_list.clone();
-                defer working_list.deinit();
-                lib.eliminateWords(&working_list, guess, lib.compareGuess(guess, key));
-                sum += list_size - working_list.items.len;
-            }
-            try word_loss_list.append(sum / list_size);
-            std.debug.print("\u{001B}[2F", .{});
+        _ = try word_loss_list.addManyAsSlice(list_size);
+
+        for (threads) |*thread| {
+            thread.* = try std.Thread.spawn(.{}, checkKeyword, .{
+                &word_list,
+                &next_lock,
+                &next_key,
+                &word_loss_list,
+            });
+        }
+
+        while (next_key < list_size) {
+            std.debug.print("Running: {d}/{d}\n\u{001B}[1F", .{ next_key, list_size });
+            std.Thread.sleep(1e9);
+        }
+
+        for (threads) |*thread| {
+            thread.join();
         }
 
         break :init word_loss_list;
