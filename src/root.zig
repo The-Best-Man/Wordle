@@ -5,9 +5,12 @@ const std = @import("std");
 const testing = std.testing;
 
 const wordle = @import("wordle.zig");
-var stdIn = std.io.getStdIn().reader();
-var stdErr = std.io.getStdErr().writer();
-var stdOut = std.io.getStdOut().writer();
+
+// TODO: Move these out of here. These should be implementation independent
+// instead of in the implementation.
+var stdIn = std.fs.File.stdin();
+var stdErr = std.fs.File.stderr();
+var stdOut = std.fs.File.stdout();
 
 const HORIZONTAL_BORDER = "\u{2500}";
 const TOP_LEFT_CORNER = "\u{250C}";
@@ -22,62 +25,62 @@ const Box = struct {
     x_pos: u16,
     y_pos: u16,
 
-    pub fn drawBox(self: Box) !void {
-        try stdOut.print("{s}", .{TOP_LEFT_CORNER});
+    pub fn drawBox(self: Box, writer: *std.Io.Writer) !void {
+        try writer.print("{s}", .{TOP_LEFT_CORNER});
         for (0..self.width) |_| {
-            try stdOut.print("{s}", .{HORIZONTAL_BORDER});
+            try writer.print("{s}", .{HORIZONTAL_BORDER});
         }
-        try stdOut.print("{s}\n", .{TOP_RIGHT_CORNER});
+        try writer.print("{s}\n", .{TOP_RIGHT_CORNER});
         for (0..self.height) |_| {
-            try stdOut.print("{s}", .{VERTICAL_BORDER});
+            try writer.print("{s}", .{VERTICAL_BORDER});
             for (0..self.width) |_| {
-                try stdOut.print(" ", .{});
+                try writer.print(" ", .{});
             }
-            try stdOut.print("{s}\n", .{VERTICAL_BORDER});
+            try writer.print("{s}\n", .{VERTICAL_BORDER});
         }
-        try stdOut.print("{s}", .{BOT_LEFT_CORNER});
+        try writer.print("{s}", .{BOT_LEFT_CORNER});
         for (0..self.width) |_| {
-            try stdOut.print("{s}", .{HORIZONTAL_BORDER});
+            try writer.print("{s}", .{HORIZONTAL_BORDER});
         }
-        try stdOut.print("{s}", .{BOT_RIGHT_CORNER});
+        try writer.print("{s}", .{BOT_RIGHT_CORNER});
     }
 
-    pub fn writeToBox(self: Box, msg: []u8) !void {
+    pub fn writeToBox(self: Box, msg: []u8, writer: *std.Io.Writer) !void {
         try moveToPos(self.x_pos, self.y_pos);
         const lines = msg.len / self.width;
         for (0..lines) |i| {
-            try stdOut.print("{s}\n", .{msg[i]});
+            try writer.print("{s}\n", .{msg[i]});
         }
     }
 };
 
-fn clearScreen() !void {
-    try stdOut.print("\u{001B}[2J", .{});
+fn clearScreen(writer: *std.Io.Writer) !void {
+    try writer.print("\u{001B}[2J", .{});
 }
 
-fn moveToPos(x_pos: u16, y_pos: u16) !void {
-    try stdOut.print("\u{001B}[{d};{d}H", .{ x_pos, y_pos });
+fn moveToPos(x_pos: u16, y_pos: u16, writer: *std.Io.Writer) !void {
+    try writer.print("\u{001B}[{d};{d}H", .{ x_pos, y_pos });
 }
 
-fn drawScreen() !void {
+fn drawScreen(writer: *std.Io.Writer) !void {
     try clearScreen();
     try moveToPos(1, 1);
     // try drawBox(10, 10);
     try moveToPos(2, 2);
-    try stdOut.print("Hello,", .{});
+    try writer.print("Hello,", .{});
     try moveToPos(3, 2);
-    try stdOut.print("World!", .{});
+    try writer.print("World!", .{});
     try moveToPos(12, 12);
-    try stdOut.print("\n", .{});
+    try writer.print("\n", .{});
 }
 
-pub fn interactive(word_list: *std.ArrayList([5]u8)) !void {
+pub fn interactive(word_list: *std.ArrayList([5]u8), writer: *std.Io.Writer) !void {
     // try drawScreen();
 
     var guess_list: [6]struct { [5]u8, [5]u8 } = undefined;
     var last_pos: u16 = 0;
     var buffer: [1024]u8 = undefined;
-    outer: while (true) : (try stdOut.print("\u{001B}[{d}F\u{001B}[2K", .{2})) {
+    outer: while (true) : (try writer.print("\u{001B}[{d}F\u{001B}[2K", .{2})) {
         const len = try stdIn.read(&buffer);
         if (len < 11) {
             try stdErr.print("Unable to parse input\n", .{});
@@ -88,7 +91,7 @@ pub fn interactive(word_list: *std.ArrayList([5]u8)) !void {
         last_pos += 1;
 
         for (0..last_pos) |i| {
-            try stdOut.print("{s} {s}\n", .{ guess_list[i][0], guess_list[i][1] });
+            try writer.print("{s} {s}\n", .{ guess_list[i][0], guess_list[i][1] });
         }
 
         const filter = init: {
@@ -110,7 +113,7 @@ pub fn interactive(word_list: *std.ArrayList([5]u8)) !void {
             if (val != .Correct)
                 break;
         } else {
-            try stdOut.print("Correct word found: {s}\n", .{buffer[0..5]});
+            try writer.print("Correct word found: {s}\n", .{buffer[0..5]});
             return;
         }
 
@@ -118,14 +121,14 @@ pub fn interactive(word_list: *std.ArrayList([5]u8)) !void {
 
         var pos: usize = 0;
         while (pos < 10 and word_list.items.len > pos) : (pos += 1) {
-            try stdOut.print("{s}\n", .{word_list.items[pos]});
+            try writer.print("{s}\n", .{word_list.items[pos]});
         }
 
-        try stdOut.print("\u{001B}[{d}F", .{last_pos + pos});
+        try writer.print("\u{001B}[{d}F", .{last_pos + pos});
     }
 }
 
-pub fn checkKeywords(word_list: *std.ArrayList([5]u8), allocator: std.mem.Allocator, num_threads: usize) !struct { [5]u8, usize } {
+pub fn checkKeywords(word_list: *std.ArrayList([5]u8), allocator: std.mem.Allocator, writer) !struct { [5]u8, usize } {
     const threads = try allocator.alloc(std.Thread, num_threads);
     var next_lock = std.Thread.Mutex{};
     var next_key: usize = 0;

@@ -6,13 +6,15 @@ fn readWords(allocator: std.mem.Allocator, file_name: []const u8) !std.ArrayList
     var word_file = try std.fs.cwd().openFile(file_name, .{});
     defer word_file.close();
 
-    var word_list = std.ArrayList([5]u8).init(allocator);
+    var word_list = std.ArrayList([5]u8).empty;
 
     var buffer: [128]u8 = undefined;
-    var reader = word_file.reader();
-    while (try reader.readUntilDelimiterOrEof(&buffer, '\n')) |buf| {
+    var reader = word_file.reader(&buffer);
+    while (reader.interface.takeDelimiterExclusive('\n')) |buf| {
         std.debug.assert(buf.len == 5);
-        _ = try word_list.append(buf[0..5].*);
+        _ = try word_list.append(allocator, buf[0..5].*);
+    } else |err| {
+        std.debug.panic("An Error occurred: {any}\n", .{err});
     }
     return word_list;
 }
